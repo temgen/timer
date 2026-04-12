@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>タイムタイマー</title>
+<title>タイムタイマー（滑らか版）</title>
 
 <style>
 body{
@@ -91,7 +91,7 @@ canvas{
 
 <canvas id="canvas" width="300" height="300"></canvas>
 
-<!-- おしまい画面 -->
+<!-- おしまい -->
 <div id="finishOverlay" onclick="hideFinish()">
   <div id="finishText">おしまい</div>
 </div>
@@ -100,11 +100,11 @@ canvas{
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-let totalTime = 60;
-let remaining = 60;
-let timer = null;
+let duration = 60000; // ms
+let startTime = null;
+let running = false;
 
-// 音関連
+// 音
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 let beepInterval = null;
 
@@ -112,7 +112,7 @@ function beep(){
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
 
-  osc.type = "square"; // ピーピーっぽく
+  osc.type = "square";
   osc.frequency.value = 1000;
 
   osc.connect(gain);
@@ -127,8 +127,8 @@ function beep(){
 }
 
 function startBeepLoop(){
-  beep(); // すぐ1回
-  beepInterval = setInterval(beep, 400); // ピーピー繰り返し
+  beep();
+  beepInterval = setInterval(beep, 400);
 }
 
 function stopBeepLoop(){
@@ -136,98 +136,116 @@ function stopBeepLoop(){
   beepInterval = null;
 }
 
-function format(t){
-  const m = Math.floor(t/60);
-  const s = t%60;
+// 表示フォーマット
+function format(sec){
+  const m = Math.floor(sec/60);
+  const s = sec%60;
   return String(m).padStart(2,'0') + ":" + String(s).padStart(2,'0');
 }
 
-function draw(){
+// 描画（滑らか）
+function draw(ratio, remainingMs){
   ctx.clearRect(0,0,300,300);
 
+  // 背景円
   ctx.beginPath();
   ctx.arc(150,150,140,0,Math.PI*2);
   ctx.fillStyle="#eee";
   ctx.fill();
 
-  const ratio = remaining / totalTime;
-
+  // 残り
   ctx.beginPath();
   ctx.moveTo(150,150);
   ctx.arc(
     150,150,140,
     -Math.PI/2,
-    -Math.PI/2 + Math.PI*2*ratio,
-    false
+    -Math.PI/2 + Math.PI*2*ratio
   );
   ctx.fillStyle="#ff6b6b";
   ctx.fill();
+
+  // テキスト
+  const sec = Math.ceil(remainingMs / 1000);
+  document.getElementById("timeDisplay").textContent = format(sec);
 
   ctx.fillStyle="#333";
   ctx.font="40px sans-serif";
   ctx.textAlign="center";
   ctx.textBaseline="middle";
-  ctx.fillText(format(remaining),150,150);
+  ctx.fillText(format(sec),150,150);
 }
 
+// メインループ（60fps）
+function loop(now){
+  if(!running) return;
+
+  const elapsed = now - startTime;
+  const remainingMs = Math.max(0, duration - elapsed);
+  const ratio = remainingMs / duration;
+
+  draw(ratio, remainingMs);
+
+  if(remainingMs <= 0){
+    running = false;
+    finish();
+    return;
+  }
+
+  requestAnimationFrame(loop);
+}
+
+// スタート
 function start(){
-  if(timer) return;
+  if(running) return;
 
   stopBeepLoop();
+  hideFinish();
 
   const m = parseInt(document.getElementById("min").value)||0;
   const s = parseInt(document.getElementById("sec").value)||0;
 
-  totalTime = m*60 + s;
-  if(totalTime <= 0) return;
+  duration = (m*60 + s) * 1000;
+  if(duration <= 0) return;
 
-  remaining = totalTime;
+  startTime = performance.now();
+  running = true;
 
-  timer = setInterval(()=>{
-    remaining--;
-
-    if(remaining <= 0){
-      remaining = 0;
-      stop();
-      finish();
-    }
-
-    update();
-  },1000);
-
-  update();
+  requestAnimationFrame(loop);
 }
 
+// ストップ
 function stop(){
-  clearInterval(timer);
-  timer = null;
+  running = false;
 }
 
+// リセット
 function reset(){
-  stop();
+  running = false;
   stopBeepLoop();
   hideFinish();
-  remaining = totalTime;
-  update();
+
+  const m = parseInt(document.getElementById("min").value)||0;
+  const s = parseInt(document.getElementById("sec").value)||0;
+
+  duration = (m*60 + s) * 1000;
+
+  draw(1, duration);
 }
 
+// 終了
 function finish(){
   startBeepLoop();
   document.getElementById("finishOverlay").style.display = "flex";
 }
 
+// 消す
 function hideFinish(){
   document.getElementById("finishOverlay").style.display = "none";
-  stopBeepLoop(); // タップで音停止
-}
-
-function update(){
-  document.getElementById("timeDisplay").textContent = format(remaining);
-  draw();
+  stopBeepLoop();
 }
 
 // 初期描画
-update();
+draw(1, duration);
 </script>
 
 </body>
