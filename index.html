@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>タイムタイマー（滑らか版）</title>
+<title>タイムタイマー（Safari完全対応版）</title>
 
 <style>
 body{
@@ -37,8 +37,6 @@ button{
   color:white;
 }
 
-button:active{ transform:scale(0.95); }
-
 #timeDisplay{
   font-size:32px;
   margin-bottom:10px;
@@ -50,7 +48,6 @@ canvas{
   box-shadow:0 0 10px rgba(0,0,0,0.2);
 }
 
-/* おしまい表示 */
 #finishOverlay{
   position:fixed;
   top:0;
@@ -61,7 +58,6 @@ canvas{
   display:none;
   align-items:center;
   justify-content:center;
-  z-index:100;
 }
 
 #finishText{
@@ -79,8 +75,8 @@ canvas{
 <h1>タイムタイマー</h1>
 
 <div id="controls">
-  分: <input id="min" type="number" value="1" min="0">
-  秒: <input id="sec" type="number" value="0" min="0" max="59">
+  分: <input id="min" type="number" value="1">
+  秒: <input id="sec" type="number" value="0">
   <br>
   <button onclick="start()">スタート</button>
   <button onclick="stop()">ストップ</button>
@@ -88,42 +84,79 @@ canvas{
 </div>
 
 <div id="timeDisplay">01:00</div>
-
 <canvas id="canvas" width="300" height="300"></canvas>
 
-<!-- おしまい -->
 <div id="finishOverlay" onclick="hideFinish()">
   <div id="finishText">おしまい</div>
 </div>
+
+<!-- フォールバック音 -->
+<audio id="alarmAudio" preload="auto">
+  <source src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=" type="audio/wav">
+</audio>
 
 <script>
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-let duration = 60000; // ms
+let duration = 60000;
 let startTime = null;
 let running = false;
 
-// 音
+// ===== 音関連 =====
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 let beepInterval = null;
 
+// Safari対策：音の解放
+function unlockAudio(){
+  try{
+    if(audioCtx.state === "suspended"){
+      audioCtx.resume();
+    }
+
+    // 無音再生（これが効く）
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0;
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.01);
+  }catch(e){}
+}
+
+// WebAudio音
+function beepWebAudio(){
+  try{
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc.type = "square";
+    osc.frequency.value = 1000;
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start();
+
+    gain.gain.setValueAtTime(1, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+
+    osc.stop(audioCtx.currentTime + 0.2);
+  }catch(e){}
+}
+
+// フォールバック（audioタグ）
+function beepFallback(){
+  const a = document.getElementById("alarmAudio");
+  a.currentTime = 0;
+  a.play().catch(()=>{});
+}
+
+// 安定版ビープ
 function beep(){
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-
-  osc.type = "square";
-  osc.frequency.value = 1000;
-
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-
-  osc.start();
-
-  gain.gain.setValueAtTime(1, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
-
-  osc.stop(audioCtx.currentTime + 0.2);
+  beepWebAudio();
+  beepFallback();
 }
 
 function startBeepLoop(){
@@ -136,24 +169,21 @@ function stopBeepLoop(){
   beepInterval = null;
 }
 
-// 表示フォーマット
+// ===== タイマー =====
 function format(sec){
   const m = Math.floor(sec/60);
   const s = sec%60;
   return String(m).padStart(2,'0') + ":" + String(s).padStart(2,'0');
 }
 
-// 描画（滑らか）
 function draw(ratio, remainingMs){
   ctx.clearRect(0,0,300,300);
 
-  // 背景円
   ctx.beginPath();
   ctx.arc(150,150,140,0,Math.PI*2);
   ctx.fillStyle="#eee";
   ctx.fill();
 
-  // 残り
   ctx.beginPath();
   ctx.moveTo(150,150);
   ctx.arc(
@@ -164,8 +194,7 @@ function draw(ratio, remainingMs){
   ctx.fillStyle="#ff6b6b";
   ctx.fill();
 
-  // テキスト
-  const sec = Math.ceil(remainingMs / 1000);
+  const sec = Math.ceil(remainingMs/1000);
   document.getElementById("timeDisplay").textContent = format(sec);
 
   ctx.fillStyle="#333";
@@ -175,7 +204,6 @@ function draw(ratio, remainingMs){
   ctx.fillText(format(sec),150,150);
 }
 
-// メインループ（60fps）
 function loop(now){
   if(!running) return;
 
@@ -194,17 +222,18 @@ function loop(now){
   requestAnimationFrame(loop);
 }
 
-// スタート
 function start(){
   if(running) return;
+
+  unlockAudio(); // ←これが最重要
 
   stopBeepLoop();
   hideFinish();
 
-  const m = parseInt(document.getElementById("min").value)||0;
-  const s = parseInt(document.getElementById("sec").value)||0;
+  const m = parseInt(min.value)||0;
+  const s = parseInt(sec.value)||0;
 
-  duration = (m*60 + s) * 1000;
+  duration = (m*60 + s)*1000;
   if(duration <= 0) return;
 
   startTime = performance.now();
@@ -213,34 +242,24 @@ function start(){
   requestAnimationFrame(loop);
 }
 
-// ストップ
 function stop(){
   running = false;
 }
 
-// リセット
 function reset(){
   running = false;
   stopBeepLoop();
   hideFinish();
-
-  const m = parseInt(document.getElementById("min").value)||0;
-  const s = parseInt(document.getElementById("sec").value)||0;
-
-  duration = (m*60 + s) * 1000;
-
   draw(1, duration);
 }
 
-// 終了
 function finish(){
   startBeepLoop();
-  document.getElementById("finishOverlay").style.display = "flex";
+  document.getElementById("finishOverlay").style.display="flex";
 }
 
-// 消す
 function hideFinish(){
-  document.getElementById("finishOverlay").style.display = "none";
+  document.getElementById("finishOverlay").style.display="none";
   stopBeepLoop();
 }
 
